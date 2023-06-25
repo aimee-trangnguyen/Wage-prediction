@@ -1,0 +1,178 @@
+---
+title: "How job type and workers' characteristics affect wage"
+author: "Aimee Trang Thuy Nguyen"
+output: html_document
+---
+
+Your wage will likely change with your age as you gain experience, switch jobs or get promotions. The relation between wage and age provides you insight in how much you can expect your wage to grow, but is also an important variable for mortgage or pension calculations.
+In this analysis, we will look at the wages of a group of workers and how this is related to job type and the characteristics of the workers.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r echo = FALSE, warning=FALSE, message=FALSE}
+library(tidyverse)
+library(visreg)
+library(mgcv)
+library(ISLR)
+library(broom)
+library(splines)
+help(Wage)
+```
+
+#Question 1
+
+```{r echo = FALSE, message = FALSE}
+wage <- Wage %>%
+  select(wage, age, year, education, jobclass)
+```
+
+```{r echo = FALSE, message= FALSE}
+ggplot(wage, aes(x= age, y = wage)) + geom_point() + geom_smooth() + ggtitle("Wage against Age")
+``` 
+
+It seems like there is non-linear relationship between **wage** and **age**. As a workers' age increase from 18 to around 45, their wages also rise. However, from 45 onward, the wage starts to decrease gradually and the drops at a little higher rate from 65 years old. There are also some outliers where the wages are much higher than the average and this happens with 30 to 65 age range. 
+
+```{r echo = FALSE}
+ggplot(wage, aes(x= year, y = wage)) + geom_jitter()+ ggtitle("Wage over time")
+```
+
+There is no clear pattern in the relationship between **wage** and **year**. 
+
+
+```{r echo = FALSE}
+ggplot(wage, aes(x= education, y = wage)) + geom_boxplot() + ggtitle("Wage against Education")
+```
+
+From this boxplot, we can defenitely observe that as the educatiton level of a worker is higher, their wages also rise up. In other words, **wage** and **education** have positive correlation. 
+
+```{r echo = FALSE, message=FALSE}
+ggplot(wage, aes(x= jobclass, y = wage)) + geom_boxplot() + geom_smooth() + ggtitle("Wage against Job class")
+```
+
+It seems that if the **job class** of a worker is *Information*, then his wage tends to be higher than a worker whose job class is *Industrial*. 
+
+#Question 2
+
+```{r echo = FALSE}
+fit <- gam(wage~ age + year + education + jobclass, data = wage)
+summary(fit)
+```
+
++ On average, a **20-year-old** worker earns `r fit$coefficient[2]*20` thousands of dollars, holding all other things constant 
++ On average, a **60-year-old** worker earns `r fit$coefficient[2]*60` thousands of dollars, holdind all other things constant 
++ So on average, the worker of 20 years old earns `r fit$coefficient[2]*60- fit$coefficient[2]*20` thousands of dollars less than the worker of 60 years old, holding all other things constant 
+
+```{r echo = FALSE}
+visreg(fit, "age", gg = TRUE)
+```
+
+The plot shows that as people get older, they would earn more. The reason might be because they have more experience so they get promotion, or they change to other higher wage job. 
+
+#Question 3
+
+```{r echo = FALSE, message = FALSE}
+fit_aug <- augment(fit)
+
+#Check for heterokedasticity
+fit_aug %>%
+  ggplot(aes(x=.fitted, y=.resid)) +
+    geom_point() + geom_smooth()
+
+fit_aug %>%
+  ggplot() + geom_qq(aes(sample=.resid))
+
+```
+
+The QQ plot shows that the line bended and not exactly or near 45 degree line so there exists non-linearity. The residuals and fitted values plot also shows some heteroskedasticity and skewness. 
+
+We may take the log transformation to make the pattern more interpretable. 
+
+```{r echo = FALSE}
+fit_log <- gam(log(wage) ~ age + year + education + jobclass, data = wage)
+summary(fit_log)
+```
+
+```{r echo = FALSE, message = FALSE}
+augment(fit_log) %>%
+  ggplot(aes(x=.fitted, y =.resid)) + geom_point() + geom_smooth()
+
+augment(fit_log) %>%
+  ggplot() + geom_qq(aes(sample=.resid))
+```
+
+The QQ plot now is more near to 45 degree line. The residuals and fitted values plot is also less heterokedasticity. It looks better than before but non-linearity is still not captured well by the model. We will need more complex model to deal with this.
+
+#Question 4
+
+```{r echo = FALSE}
+regression_spline <- gam(log(wage) ~ s(age, k =20, fx = TRUE) + s(year, k= 4, fx = TRUE) + education + jobclass, method = "REML", data= wage)
+summary(regression_spline)
+```
+
+```{r echo = FALSE}
+visreg(regression_spline, gg=TRUE)
+```
+
++ **age**: It is clearly different from the regression line in *Question 2* where we only fit a linear model. Here, the regression spline allows for the up and down changes during different period of age. For example, the visreg plot shown in **Question 2** illustrates that the wage increase as people get older. However, with regression spline, we can see a drop of wage from around 65 until 76, after that the wage increase again (probably due to pension). 
+
++ **year**: We fit a spline with 4 knots for year but looking at the plot, we barely observe any wiggle. The plot displays an upward trend of wage over time and it is reasonable to see this trend because of growing economic. Thus, we may not need to add splines for the **year** variable.
+
++ **education**: The plot shows the same pattern as in *Question 1* - The higher the education, the higher the wage.
+
++ **jobclass**: Male workers whose type of job is **Information** tend to earn higher wage than workers whose type of job is **Industrial**.
+
+
+#Question 5
+
+```{r echo = FALSE}
+penalize <- gam(log(wage)~ s(age, k=20)+ year + education + jobclass,method = "REML", data= wage)
+summary(penalize)
+visreg(penalize, "age", gg=TRUE)
+```
+
+The regression line is much smoother here since penalizing knots is allowed when fitting the model. We now observe three period of changes in wage:
+ - The wage increases from **18 to 40 years old** 
+ - Then the wage barely changes until a worker reaches **60 years old**
+ - From **60 years old** onward, the wage declines gradually
+ 
+The confidence interval is much wider toward the end of the line (from 65 to 80 years old). This is because we only have a few observations for these ages, so the model is more uncertain in predicting the wage.
+
+#Question 6
+```{r echo = FALSE}
+interaction <- gam(log(wage)~ year + education + jobclass + te(age, k = 20, by = jobclass), data= wage)
+summary(interaction)
+visreg(interaction, "age", by ="jobclass", gg=TRUE, partial=FALSE, rug=FALSE, overlay=TRUE) + theme_bw()
+
+```
+
+In general, **Information** workers earn higher than **Industrial** workers regarding of what their ages are. The wage change of both `jobclass` is cubic spline but **Information** has more knots than **Industrial**, in other words, wage of **Information** workers is more varied. From **18 to over 40 years old**, both `jobclass` workers earn higher wage as they are older. After that, however, wage of **Information** workers drops slightly until **60 years old**, by then it starts recovering. On the other hand, the wage of **Industrial** workers tends to remain unchange until around **55 years old**, the wage then declines as they get older. We can also see that from **60 to 80 years old**, the wage of **Industrial** workers drops at higher rate than **Information** workers. 
+
+#Question 7
+
+```{r echo = FALSE}
+#Test interaction significance
+
+anova(penalize, interaction, test = "F")
+```
+
+Based on the F test, we cannot reject the null hypothesis that the interaction is insignificant. Thus, the model is better without the interaction. 
+As a result, we will choose the penalize regression spline with 20 knots for age. Next, we can test whether this model contains any non-linearity. 
+
+```{r echo=FALSE}
+anova(penalize, fit_log, test = "F")
+```
+
+Since p-value is much smaller than 0.05, we can reject the null hypothesis of linearity and conclude that there is non-linear term existing in the model. And the non-linear term is `age`. 
+
+#Question 8
+
+```{r echo = FALSE}
+pred1 <- predict(penalize, data.frame(age=20,year= 2009,education='2. HS Grad', jobclass = '1. Industrial'), se=TRUE)
+pred2 <- predict(penalize, data.frame(age=60,year=2009,education='2. HS Grad', jobclass = '1. Industrial'), se=TRUE)
+```
+
++ For an *Industrial* job in *2009*, a *20-year-old* worker with *HS Grad* education is predicted to earn `r exp(pred1$fit)` thousands of dollars.
+
++  For an *Industrial* job in *2009*, a *60-year-old* worker with *HS Grad* education is predicted to earn `r exp(pred2$fit)` thousands of dollars.
